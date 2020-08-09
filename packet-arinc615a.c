@@ -107,23 +107,28 @@ static void dissect_a615a_LCL(tvbuff_t *tvb, packet_info *pinfo _U_, int offset,
     PARS_RET_UINT16(root, number_target_hardware);
 
     for (unsigned i = 0; i < number_target_hardware; ++i) {
-        PARS_A615STRING(root, literal_name);
-        PARS_A615STRING(root, serial_number);
-
-        PARS_RET_UINT16(root, part_number_count);
+        int len = tvb_get_guint8(tvb, offset);
+        char *str = tvb_format_text(tvb, offset + 1, len - 1);
+        proto_tree *target_root = proto_tree_add_subtree_format(root, tvb, offset, -1, ett_a615a,
+                                                                NULL, "Target %d - %s", i + 1, str);
+        int begin_offset = offset;
+        PARS_A615STRING(target_root, literal_name);
+        PARS_A615STRING(target_root, serial_number);
+        PARS_RET_UINT16(target_root, part_number_count);
 
         for (unsigned j = 0; j < part_number_count; ++j) {
-            int len = tvb_get_guint8(tvb, offset);
-            char *str = tvb_format_text(tvb, offset + 1, len - 1);
-            proto_tree *part_root = proto_tree_add_subtree_format(root, tvb, offset, -1, ett_a615a,
-                                                                  NULL, "Part %d - %s", j + 1, str);
+            int len2 = tvb_get_guint8(tvb, offset);
+            char *str2 = tvb_format_text(tvb, offset + 1, len2 - 1);
+            proto_tree *part_root = proto_tree_add_subtree_format(
+                target_root, tvb, offset, -1, ett_a615a, NULL, "Part %d - %s", j + 1, str2);
 
-            int begin_offset = offset;
+            int begin_offset2 = offset;
             PARS_A615STRING(part_root, part_number);
             PARS_A615STRING(part_root, ammendment);
             PARS_A615STRING(part_root, designation);
-            proto_item_set_len(part_root, offset - begin_offset);
+            proto_item_set_len(part_root, offset - begin_offset2);
         }
+        proto_item_set_len(target_root, offset - begin_offset);
     }
 }
 
