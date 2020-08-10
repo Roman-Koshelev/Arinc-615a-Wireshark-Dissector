@@ -32,15 +32,12 @@
     proto_tree_add_item(proto_tree, hf_a615a_load_ratio, tvb, offset, 3, ENC_ASCII); \
     offset += 3
 
-#define PARS_A615STRING(proto_tree, name)                                                 \
-    do {                                                                                  \
-        guint32 length;                                                                   \
-        proto_tree_add_item_ret_uint(proto_tree, hf_a615a_length, tvb, offset, 1, ENC_NA, \
-                                     &length);                                            \
-        offset += 1;                                                                      \
-        proto_tree_add_item(proto_tree, hf_a615a_##name, tvb, offset, length, ENC_ASCII); \
-        offset += length;                                                                 \
-                                                                                          \
+#define PARS_A615STRING(proto_tree, name)                                                      \
+    do {                                                                                       \
+        gint length;                                                                           \
+        proto_tree_add_item_ret_length(proto_tree, hf_a615a_##name, tvb, offset, 1, ENC_ASCII, \
+                                       &length);                                               \
+        offset += length;                                                                      \
     } while (0)
 
 enum A615A_SUFFIX { LCI, LCL, LCS, LNA, LND, LNL, LNO, LNR, LNS, LUI, LUR, LUS };
@@ -86,7 +83,6 @@ static int hf_a615a_counter = -1;
 static int hf_a615a_operation_status = -1;
 static int hf_a615a_exception_timer = -1;
 static int hf_a615a_estimated_time = -1;
-static int hf_a615a_length = -1;
 static int hf_a615a_status_description = -1;
 static int hf_a615a_load_ratio = -1;
 static int hf_a615a_file_count = -1;
@@ -381,7 +377,7 @@ void proto_register_a615a(void)
          {"File Length", "a615a.file_length", FT_UINT32, BASE_DEC, NULL, 0x0,
           "A615a Protocol File Length", HFILL}},
         {&hf_a615a_protocol_version,
-         {"Protocol Version", "a615a.protocol_version", FT_STRINGZ, BASE_NONE, NULL, 0x0,
+         {"Protocol Version", "a615a.protocol_version", FT_STRING, BASE_NONE, NULL, 0x0,
           "A615a Protocol File Version", HFILL}},
         {&hf_a615a_counter,
          {"Counter", "a615a.counter", FT_UINT16, BASE_DEC, NULL, 0x0, "A615a Protocol Counter",
@@ -395,46 +391,44 @@ void proto_register_a615a(void)
         {&hf_a615a_estimated_time,
          {"Estimated Time", "a615a.estimated_time", FT_UINT16, BASE_DEC, NULL, 0x0,
           "A615a Estimated Time", HFILL}},
-        {&hf_a615a_length,
-         {"Length", "a615a.len", FT_UINT8, BASE_DEC, NULL, 0x0, NULL, HFILL}},
         {&hf_a615a_status_description,
-         {"Status Description", "a615a.status", FT_STRINGZ, BASE_NONE, NULL, 0x0,
+         {"Status Description", "a615a.status", FT_UINT_STRING, BASE_NONE, NULL, 0x0,
           "A615a Status Description", HFILL}},
         {&hf_a615a_load_ratio,
-         {"Load Ratio", "a615a.load_ratio", FT_STRINGZ, BASE_NONE, NULL, 0x0,
+         {"Load Ratio", "a615a.load_ratio", FT_STRING, BASE_NONE, NULL, 0x0,
           "A615a Load Operation Ratio", HFILL}},
         {&hf_a615a_file_count,
          {"File Count", "a615a.file_count", FT_UINT16, BASE_DEC, NULL, 0x0, "A615a File Count",
           HFILL}},
         {&hf_a615a_file_name,
-         {"File Name", "a615a.file_name", FT_STRINGZ, BASE_NONE, NULL, 0x0, "A615a File Name",
+         {"File Name", "a615a.file_name", FT_UINT_STRING, BASE_NONE, NULL, 0x0, "A615a File Name",
           HFILL}},
         {&hf_a615a_file_description,
-         {"File Description", "a615a.file_description", FT_STRINGZ, BASE_NONE, NULL, 0x0,
+         {"File Description", "a615a.file_description", FT_UINT_STRING, BASE_NONE, NULL, 0x0,
           "A615a File Description", HFILL}},
         {&hf_a615a_part_number,
-         {"Part Number", "a615a.part_number", FT_STRINGZ, BASE_NONE, NULL, 0x0, "A615a Part Number",
-          HFILL}},
+         {"Part Number", "a615a.part_number", FT_UINT_STRING, BASE_NONE, NULL, 0x0,
+          "A615a Part Number", HFILL}},
         {&hf_a615a_number_target_hardware,
          {"Number of Target Hardware", "a615a.num_hardware", FT_UINT16, BASE_DEC, NULL, 0x0,
           "A615a Number of Target Hardware", HFILL}},
         {&hf_a615a_literal_name,
-         {"Literal Name", "a615a.literal_name", FT_STRINGZ, BASE_NONE, NULL, 0x0,
+         {"Literal Name", "a615a.literal_name", FT_UINT_STRING, BASE_NONE, NULL, 0x0,
           "A615a Literal Name", HFILL}},
         {&hf_a615a_serial_number,
-         {"Serial Number", "a615a.serial_number", FT_STRINGZ, BASE_NONE, NULL, 0x0,
+         {"Serial Number", "a615a.serial_number", FT_UINT_STRING, BASE_NONE, NULL, 0x0,
           "A615a Serial Number", HFILL}},
         {&hf_a615a_part_number_count,
          {"Part Number Count", "a615a.num_parts", FT_UINT16, BASE_DEC, NULL, 0x0,
           "A615a Part Number Count", HFILL}},
         {&hf_a615a_ammendment,
-         {"Ammendment", "a615a.ammendment", FT_STRINGZ, BASE_NONE, NULL, 0x0, "A615a Ammendment",
-          HFILL}},
+         {"Ammendment", "a615a.ammendment", FT_UINT_STRING, BASE_NONE, NULL, 0x0,
+          "A615a Ammendment", HFILL}},
         {&hf_a615a_designation,
-         {"Designation", "a615a.designation", FT_STRINGZ, BASE_NONE, NULL, 0x0, "A615a Designation",
-          HFILL}},
+         {"Designation", "a615a.designation", FT_UINT_STRING, BASE_NONE, NULL, 0x0,
+          "A615a Designation", HFILL}},
         {&hf_a615a_user_data,
-         {"User Data", "a615a.user_data", FT_BYTES, BASE_NONE, NULL, 0x0, "User Data", HFILL}},
+         {"User Data", "a615a.user_data", FT_UINT_BYTES, BASE_NONE, NULL, 0x0, "User Data", HFILL}},
         {&hf_a615a_file_type,
          {"Type", "a615a.type", FT_STRINGZ, BASE_NONE, NULL, 0x0, "A615a File type", HFILL}},
     };
