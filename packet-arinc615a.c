@@ -1,44 +1,9 @@
-#include <stdio.h>
-
 #include "config.h"
 
 #include <epan/packet.h>
+#include <epan/ptvcursor.h>
 
 #include <epan/dissectors/packet-tftp.h>
-
-#define PARS_RET_UINT16(proto_tree, name)                                                     \
-    guint32 name;                                                                             \
-    proto_tree_add_item_ret_uint(proto_tree, hf_a615a_##name, tvb, offset, 2, ENC_BIG_ENDIAN, \
-                                 &name);                                                      \
-    offset += 2
-
-#define PARS_UINT16(proto_tree, name)                                                 \
-    proto_tree_add_item(proto_tree, hf_a615a_##name, tvb, offset, 2, ENC_BIG_ENDIAN); \
-    offset += 2
-
-#define PARS_UINT32(proto_tree, name)                                                 \
-    proto_tree_add_item(proto_tree, hf_a615a_##name, tvb, offset, 4, ENC_BIG_ENDIAN); \
-    offset += 4
-
-#define PARS_OPERATION_STATUS_CODE(proto_tree)                                               \
-    do {                                                                                     \
-        PARS_RET_UINT16(proto_tree, operation_status);                                       \
-        col_append_fstr(                                                                     \
-            pinfo->cinfo, COL_INFO, ", Status: %s",                                          \
-            val_to_str(operation_status, a615a_operation_status_codes, "Unknown (0x%04x)")); \
-    } while (0);
-
-#define PARS_LOAD_RATIO(proto_tree)                                                  \
-    proto_tree_add_item(proto_tree, hf_a615a_load_ratio, tvb, offset, 3, ENC_ASCII); \
-    offset += 3
-
-#define PARS_A615STRING(proto_tree, name)                                                      \
-    do {                                                                                       \
-        gint length;                                                                           \
-        proto_tree_add_item_ret_length(proto_tree, hf_a615a_##name, tvb, offset, 1, ENC_ASCII, \
-                                       &length);                                               \
-        offset += length;                                                                      \
-    } while (0)
 
 enum A615A_SUFFIX { LCI, LCL, LCS, LNA, LND, LNL, LNO, LNR, LNS, LUI, LUR, LUS };
 
@@ -98,186 +63,154 @@ static int hf_a615a_designation = -1;
 static int hf_a615a_user_data = -1;
 static int hf_a615a_file_type = -1;
 
-static void dissect_a615a_LCL(tvbuff_t *tvb, packet_info *pinfo _U_, int offset, proto_tree *root)
+static void dissect_a615a_LCL(ptvcursor_t *ptvc, packet_info *pinfo _U_)
 {
-    PARS_RET_UINT16(root, number_target_hardware);
+    guint32 th_count, pn_count;
+    proto_item *pi;
 
-    for (unsigned i = 0; i < number_target_hardware; ++i) {
-        int len = tvb_get_guint8(tvb, offset);
-        char *str = tvb_format_text(tvb, offset + 1, len - 1);
-        proto_tree *target_root = proto_tree_add_subtree_format(root, tvb, offset, -1, ett_a615a,
-                                                                NULL, "Target %d - %s", i + 1, str);
-        int begin_offset = offset;
-        PARS_A615STRING(target_root, literal_name);
-        PARS_A615STRING(target_root, serial_number);
-        PARS_RET_UINT16(target_root, part_number_count);
+    pi =
+        ptvcursor_add_ret_uint(ptvc, hf_a615a_number_target_hardware, 2, ENC_BIG_ENDIAN, &th_count);
 
-        for (unsigned j = 0; j < part_number_count; ++j) {
-            int len2 = tvb_get_guint8(tvb, offset);
-            char *str2 = tvb_format_text(tvb, offset + 1, len2 - 1);
-            proto_tree *part_root = proto_tree_add_subtree_format(
-                target_root, tvb, offset, -1, ett_a615a, NULL, "Part %d - %s", j + 1, str2);
+    for (unsigned i = 0; i < th_count; ++i) {
+        pi = ptvcursor_add(ptvc, hf_a615a_literal_name, 1, ENC_ASCII);
+        ptvcursor_push_subtree(ptvc, pi, ett_a615a);
+        ptvcursor_add(ptvc, hf_a615a_serial_number, 1, ENC_ASCII);
+        pi = ptvcursor_add_ret_uint(ptvc, hf_a615a_part_number_count, 2, ENC_BIG_ENDIAN, &pn_count);
 
-            int begin_offset2 = offset;
-            PARS_A615STRING(part_root, part_number);
-            PARS_A615STRING(part_root, ammendment);
-            PARS_A615STRING(part_root, designation);
-            proto_item_set_len(part_root, offset - begin_offset2);
+        for (unsigned j = 0; j < pn_count; ++j) {
+            pi = ptvcursor_add(ptvc, hf_a615a_part_number, 1, ENC_ASCII);
+            ptvcursor_push_subtree(ptvc, pi, ett_a615a);
+            ptvcursor_add(ptvc, hf_a615a_ammendment, 1, ENC_ASCII);
+            ptvcursor_add(ptvc, hf_a615a_designation, 1, ENC_ASCII);
+            ptvcursor_pop_subtree(ptvc);
         }
-        proto_item_set_len(target_root, offset - begin_offset);
+        ptvcursor_pop_subtree(ptvc);
     }
 }
 
-static void dissect_a615a_LUS(tvbuff_t *tvb, packet_info *pinfo, int offset, proto_tree *root)
+static void dissect_a615a_LUS(ptvcursor_t *ptvc, packet_info *pinfo)
 {
-    PARS_OPERATION_STATUS_CODE(root);
-    PARS_A615STRING(root, status_description);
-    PARS_UINT16(root, counter);
-    PARS_UINT16(root, exception_timer);
-    PARS_UINT16(root, estimated_time);
-    PARS_LOAD_RATIO(root);
-    PARS_RET_UINT16(root, file_count);
+    guint32 status, file_count;
+    const guint8 *ratio;
+    proto_item *pi;
 
+    ptvcursor_add_ret_uint(ptvc, hf_a615a_operation_status, 2, ENC_BIG_ENDIAN, &status);
+    col_append_fstr(pinfo->cinfo, COL_INFO, ", Status: %s",
+                    val_to_str(status, a615a_operation_status_codes, "Unknown (0x%04x)"));
+    ptvcursor_add(ptvc, hf_a615a_status_description, 1, ENC_ASCII);
+    ptvcursor_add(ptvc, hf_a615a_counter, 2, ENC_BIG_ENDIAN);
+    ptvcursor_add(ptvc, hf_a615a_exception_timer, 2, ENC_BIG_ENDIAN);
+    ptvcursor_add(ptvc, hf_a615a_estimated_time, 2, ENC_BIG_ENDIAN);
+    ptvcursor_add_ret_string(ptvc, hf_a615a_load_ratio, 3, ENC_ASCII, wmem_packet_scope(), &ratio);
+    col_append_fstr(pinfo->cinfo, COL_INFO, ", Load Ratio: %s %%", ratio);
+    pi = ptvcursor_add_ret_uint(ptvc, hf_a615a_file_count, 2, ENC_BIG_ENDIAN, &file_count);
+
+    ptvcursor_push_subtree(ptvc, pi, ett_a615a);
     for (unsigned i = 0; i < file_count; ++i) {
-        int len = tvb_get_guint8(tvb, offset);
-        char *str = tvb_format_text(tvb, offset + 1, len - 1);
-        proto_tree *part_root = proto_tree_add_subtree_format(root, tvb, offset, -1, ett_a615a,
-                                                              NULL, "Header %d - %s", i + 1, str);
+        pi = ptvcursor_add(ptvc, hf_a615a_file_name, 1, ENC_ASCII);
+        ptvcursor_push_subtree(ptvc, pi, ett_a615a);
+        ptvcursor_add(ptvc, hf_a615a_part_number, 1, ENC_ASCII);
+        ptvcursor_add(ptvc, hf_a615a_load_ratio, 3, ENC_ASCII);
+        ptvcursor_add(ptvc, hf_a615a_operation_status, 2, ENC_BIG_ENDIAN);
+        ptvcursor_add(ptvc, hf_a615a_status_description, 1, ENC_ASCII);
+        ptvcursor_pop_subtree(ptvc);
+    }
+    ptvcursor_pop_subtree(ptvc);
+}
 
-        int begin_offset = offset;
-        PARS_A615STRING(part_root, file_name);
-        PARS_A615STRING(part_root, part_number);
-        PARS_LOAD_RATIO(part_root);
-        PARS_UINT16(part_root, operation_status);
-        PARS_A615STRING(part_root, status_description);
-        proto_item_set_len(part_root, offset - begin_offset);
+static void dissect_a615a_LCS(ptvcursor_t *ptvc, packet_info *pinfo)
+{
+    guint32 status;
+
+    ptvcursor_add(ptvc, hf_a615a_counter, 2, ENC_BIG_ENDIAN);
+    ptvcursor_add_ret_uint(ptvc, hf_a615a_operation_status, 2, ENC_BIG_ENDIAN, &status);
+    col_append_fstr(pinfo->cinfo, COL_INFO, ", Status: %s",
+                    val_to_str(status, a615a_operation_status_codes, "Unknown (0x%04x)"));
+    ptvcursor_add(ptvc, hf_a615a_exception_timer, 2, ENC_BIG_ENDIAN);
+    ptvcursor_add(ptvc, hf_a615a_estimated_time, 2, ENC_BIG_ENDIAN);
+    ptvcursor_add(ptvc, hf_a615a_status_description, 1, ENC_ASCII);
+}
+
+static void dissect_a615a_LUI_LCI_LND_LNO(ptvcursor_t *ptvc, packet_info *pinfo)
+{
+    guint32 status;
+
+    ptvcursor_add_ret_uint(ptvc, hf_a615a_operation_status, 2, ENC_BIG_ENDIAN, &status);
+    col_append_fstr(pinfo->cinfo, COL_INFO, ", Status: %s",
+                    val_to_str(status, a615a_operation_status_codes, "Unknown (0x%04x)"));
+    ptvcursor_add(ptvc, hf_a615a_status_description, 1, ENC_ASCII);
+}
+
+static void dissect_a615a_LUR(ptvcursor_t *ptvc, packet_info *pinfo _U_)
+{
+    guint32 file_count;
+    proto_item *pi;
+
+    ptvcursor_add_ret_uint(ptvc, hf_a615a_file_count, 2, ENC_BIG_ENDIAN, &file_count);
+    for (unsigned i = 0; i < file_count; ++i) {
+        pi = ptvcursor_add(ptvc, hf_a615a_file_name, 1, ENC_ASCII);
+        ptvcursor_push_subtree(ptvc, pi, ett_a615a);
+        ptvcursor_add(ptvc, hf_a615a_part_number, 1, ENC_ASCII);
+        ptvcursor_pop_subtree(ptvc);
     }
 }
 
-static void dissect_a615a_LCS(tvbuff_t *tvb, packet_info *pinfo, int offset, proto_tree *root)
+static void dissect_a615a_LNL(ptvcursor_t *ptvc, packet_info *pinfo _U_)
 {
-    PARS_UINT16(root, counter);
-    PARS_OPERATION_STATUS_CODE(root);
-    PARS_UINT16(root, exception_timer);
-    PARS_UINT16(root, estimated_time);
-    PARS_A615STRING(root, status_description);
-}
+    guint32 file_count;
+    proto_item *pi;
 
-static void dissect_a615a_LUI(tvbuff_t *tvb, packet_info *pinfo, int offset, proto_tree *root)
-{
-    PARS_OPERATION_STATUS_CODE(root);
-    PARS_A615STRING(root, status_description);
-}
-
-static void dissect_a615a_LCI(tvbuff_t *tvb, packet_info *pinfo, int offset, proto_tree *root)
-{
-    PARS_OPERATION_STATUS_CODE(root);
-    PARS_A615STRING(root, status_description);
-}
-
-static void dissect_a615a_LND(tvbuff_t *tvb, packet_info *pinfo, int offset, proto_tree *root)
-{
-    PARS_OPERATION_STATUS_CODE(root);
-    PARS_A615STRING(root, status_description);
-}
-
-static void dissect_a615a_LNO(tvbuff_t *tvb, packet_info *pinfo, int offset, proto_tree *root)
-{
-    PARS_OPERATION_STATUS_CODE(root);
-    PARS_A615STRING(root, status_description);
-}
-
-static void dissect_a615a_LUR(tvbuff_t *tvb, packet_info *pinfo _U_, int offset, proto_tree *root)
-{
-    PARS_RET_UINT16(root, file_count);
-
+    ptvcursor_add_ret_uint(ptvc, hf_a615a_file_count, 2, ENC_BIG_ENDIAN, &file_count);
     for (unsigned i = 0; i < file_count; ++i) {
-        int len = tvb_get_guint8(tvb, offset);
-        char *str = tvb_format_text(tvb, offset + 1, len - 1);
-        proto_tree *part_root = proto_tree_add_subtree_format(root, tvb, offset, -1, ett_a615a,
-                                                              NULL, "Header %d - %s", i + 1, str);
-
-        int begin_offset = offset;
-        PARS_A615STRING(part_root, file_name);
-        PARS_A615STRING(part_root, part_number);
-        proto_item_set_len(part_root, offset - begin_offset);
+        pi = ptvcursor_add(ptvc, hf_a615a_file_name, 1, ENC_ASCII);
+        ptvcursor_push_subtree(ptvc, pi, ett_a615a);
+        ptvcursor_add(ptvc, hf_a615a_file_description, 1, ENC_ASCII);
+        ptvcursor_pop_subtree(ptvc);
     }
 }
 
-static void dissect_a615a_LNL(tvbuff_t *tvb, packet_info *pinfo _U_, int offset, proto_tree *root)
+static void dissect_a615a_LNR(ptvcursor_t *ptvc, packet_info *pinfo _U_)
 {
-    PARS_RET_UINT16(root, file_count);
+    guint32 file_count;
+
+    ptvcursor_add_ret_uint(ptvc, hf_a615a_file_count, 2, ENC_BIG_ENDIAN, &file_count);
+    for (unsigned i = 0; i < file_count; ++i) {
+        ptvcursor_add(ptvc, hf_a615a_file_name, 1, ENC_ASCII);
+    }
+    ptvcursor_add(ptvc, hf_a615a_user_data, 1, ENC_NA);
+}
+
+static void dissect_a615a_LNS(ptvcursor_t *ptvc, packet_info *pinfo)
+{
+    guint32 status, file_count;
+    proto_item *pi;
+
+    ptvcursor_add_ret_uint(ptvc, hf_a615a_operation_status, 2, ENC_BIG_ENDIAN, &status);
+    col_append_fstr(pinfo->cinfo, COL_INFO, ", Status: %s",
+                    val_to_str(status, a615a_operation_status_codes, "Unknown (0x%04x)"));
+    ptvcursor_add(ptvc, hf_a615a_status_description, 1, ENC_ASCII);
+    ptvcursor_add(ptvc, hf_a615a_counter, 2, ENC_BIG_ENDIAN);
+    ptvcursor_add(ptvc, hf_a615a_exception_timer, 2, ENC_BIG_ENDIAN);
+    ptvcursor_add(ptvc, hf_a615a_estimated_time, 2, ENC_BIG_ENDIAN);
+    ptvcursor_add(ptvc, hf_a615a_load_ratio, 3, ENC_ASCII);
+    ptvcursor_add_ret_uint(ptvc, hf_a615a_file_count, 2, ENC_BIG_ENDIAN, &file_count);
 
     for (unsigned i = 0; i < file_count; ++i) {
-        int len = tvb_get_guint8(tvb, offset);
-        char *str = tvb_format_text(tvb, offset + 1, len - 1);
-
-        proto_tree *part_root = proto_tree_add_subtree_format(root, tvb, offset, -1, ett_a615a,
-                                                              NULL, "Header %d - %s", i + 1, str);
-
-        int begin_offset = offset;
-        PARS_A615STRING(part_root, file_name);
-        PARS_A615STRING(part_root, file_description);
-        proto_item_set_len(part_root, offset - begin_offset);
+        pi = ptvcursor_add(ptvc, hf_a615a_file_name, 1, ENC_ASCII);
+        ptvcursor_push_subtree(ptvc, pi, ett_a615a);
+        ptvcursor_add(ptvc, hf_a615a_operation_status, 2, ENC_BIG_ENDIAN);
+        ptvcursor_add(ptvc, hf_a615a_file_description, 1, ENC_ASCII);
+        ptvcursor_pop_subtree(ptvc);
     }
 }
 
-static void dissect_a615a_LNR(tvbuff_t *tvb, packet_info *pinfo _U_, int offset, proto_tree *root)
+static void dissect_a615a_LNA(ptvcursor_t *ptvc, packet_info *pinfo _U_)
 {
-    PARS_RET_UINT16(root, file_count);
+    guint32 file_count;
 
+    ptvcursor_add_ret_uint(ptvc, hf_a615a_file_count, 2, ENC_BIG_ENDIAN, &file_count);
     for (unsigned i = 0; i < file_count; ++i) {
-        int len = tvb_get_guint8(tvb, offset);
-        char *str = tvb_format_text(tvb, offset + 1, len - 1);
-        proto_tree *part_root = proto_tree_add_subtree_format(root, tvb, offset, -1, ett_a615a,
-                                                              NULL, "Header %d - %s", i + 1, str);
-
-        int begin_offset = offset;
-        PARS_A615STRING(part_root, file_name);
-        proto_item_set_len(part_root, offset - begin_offset);
-    }
-
-    PARS_A615STRING(root, user_data);
-}
-
-static void dissect_a615a_LNS(tvbuff_t *tvb, packet_info *pinfo, int offset, proto_tree *root)
-{
-    PARS_OPERATION_STATUS_CODE(root);
-    PARS_A615STRING(root, status_description);
-    PARS_UINT16(root, counter);
-    PARS_UINT16(root, exception_timer);
-    PARS_UINT16(root, estimated_time);
-    PARS_LOAD_RATIO(root);
-    PARS_RET_UINT16(root, file_count);
-
-    for (unsigned i = 0; i < file_count; ++i) {
-        int len = tvb_get_guint8(tvb, offset);
-        char *str = tvb_format_text(tvb, offset + 1, len - 1);
-
-        proto_tree *part_root = proto_tree_add_subtree_format(root, tvb, offset, -1, ett_a615a,
-                                                              NULL, "Header %d - %s", i + 1, str);
-
-        int begin_offset = offset;
-        PARS_A615STRING(part_root, file_name);
-        PARS_UINT16(part_root, operation_status);
-        PARS_A615STRING(part_root, file_description);
-        proto_item_set_len(part_root, offset - begin_offset);
-    }
-}
-
-static void dissect_a615a_LNA(tvbuff_t *tvb, packet_info *pinfo _U_, int offset, proto_tree *root)
-{
-    PARS_RET_UINT16(root, file_count);
-
-    for (unsigned i = 0; i < file_count; ++i) {
-        int len = tvb_get_guint8(tvb, offset);
-        char *str = tvb_format_text(tvb, offset + 1, len - 1);
-        proto_tree *part_root = proto_tree_add_subtree_format(root, tvb, offset, -1, ett_a615a,
-                                                              NULL, "Header %d - %s", i + 1, str);
-
-        int begin_offset = offset;
-        PARS_A615STRING(part_root, file_name);
-        proto_item_set_len(part_root, offset - begin_offset);
+        ptvcursor_add(ptvc, hf_a615a_file_name, 1, ENC_ASCII);
     }
 }
 
@@ -290,58 +223,48 @@ static void dissect_a615a_protocol_file(tvbuff_t *tvb, packet_info *pinfo, proto
     ti = proto_tree_add_string(a615a_tree, hf_a615a_file_type, tvb, 0, 0, a615a_file[suffix].full);
     proto_item_set_generated(ti);
 
-    int offset = 0;
-    PARS_UINT32(a615a_tree, file_length);
-    proto_tree_add_item(a615a_tree, hf_a615a_protocol_version, tvb, offset, 2, ENC_ASCII);
-    offset += 2;
+    ptvcursor_t *ptvc = ptvcursor_new(a615a_tree, tvb, 0);
+    ptvcursor_add(ptvc, hf_a615a_file_length, 4, ENC_BIG_ENDIAN);
+    ptvcursor_add(ptvc, hf_a615a_protocol_version, 2, ENC_ASCII);
 
     switch (suffix) {
-        case LCI: {
-            dissect_a615a_LCI(tvb, pinfo, offset, a615a_tree);
+        case LUI:
+        case LCI:
+        case LND:
+        case LNO: {
+            dissect_a615a_LUI_LCI_LND_LNO(ptvc, pinfo);
             break;
         }
         case LCL: {
-            dissect_a615a_LCL(tvb, pinfo, offset, a615a_tree);
+            dissect_a615a_LCL(ptvc, pinfo);
             break;
         }
         case LCS: {
-            dissect_a615a_LCS(tvb, pinfo, offset, a615a_tree);
+            dissect_a615a_LCS(ptvc, pinfo);
             break;
         }
         case LNA: {
-            dissect_a615a_LNA(tvb, pinfo, offset, a615a_tree);
-            break;
-        }
-        case LND: {
-            dissect_a615a_LND(tvb, pinfo, offset, a615a_tree);
+            dissect_a615a_LNA(ptvc, pinfo);
             break;
         }
         case LNL: {
-            dissect_a615a_LNL(tvb, pinfo, offset, a615a_tree);
-            break;
-        }
-        case LNO: {
-            dissect_a615a_LNO(tvb, pinfo, offset, a615a_tree);
+            dissect_a615a_LNL(ptvc, pinfo);
             break;
         }
         case LNR: {
-            dissect_a615a_LNR(tvb, pinfo, offset, a615a_tree);
+            dissect_a615a_LNR(ptvc, pinfo);
             break;
         }
         case LNS: {
-            dissect_a615a_LNS(tvb, pinfo, offset, a615a_tree);
-            break;
-        }
-        case LUI: {
-            dissect_a615a_LUI(tvb, pinfo, offset, a615a_tree);
+            dissect_a615a_LNS(ptvc, pinfo);
             break;
         }
         case LUR: {
-            dissect_a615a_LUR(tvb, pinfo, offset, a615a_tree);
+            dissect_a615a_LUR(ptvc, pinfo);
             break;
         }
         case LUS: {
-            dissect_a615a_LUS(tvb, pinfo, offset, a615a_tree);
+            dissect_a615a_LUS(ptvc, pinfo);
             break;
         }
         default: {
@@ -349,6 +272,7 @@ static void dissect_a615a_protocol_file(tvbuff_t *tvb, packet_info *pinfo, proto
             break;
         }
     }
+    ptvcursor_free(ptvc);
 }
 
 static gboolean dissect_a615a_heur(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree, void *data)
