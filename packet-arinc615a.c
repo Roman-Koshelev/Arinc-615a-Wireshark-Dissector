@@ -285,7 +285,7 @@ static gboolean dissect_a615a_heur(tvbuff_t *tvb, packet_info *pinfo, proto_tree
 
     for (unsigned i = 0; i < array_length(a615a_file); ++i) {
         if (g_str_has_suffix(filename, a615a_file[i].abbreviated)) {
-            col_set_str(pinfo->cinfo, COL_PROTOCOL, "A615a-3");
+            col_set_str(pinfo->cinfo, COL_PROTOCOL, "A615a");
             col_add_str(pinfo->cinfo, COL_INFO, filename);
             dissect_a615a_protocol_file(tvb, pinfo, tree, i);
             return TRUE;
@@ -359,13 +359,13 @@ void proto_register_a615a(void)
 
     static gint *ett[] = {&ett_a615a};
 
-    proto_a615a = proto_register_protocol("Arinc 615a Protocol", "A615a-3", "a615a");
+    proto_a615a = proto_register_protocol("Arinc 615a Protocol", "A615a", "a615a");
     proto_register_field_array(proto_a615a, hf, array_length(hf));
     proto_register_subtree_array(ett, array_length(ett));
 }
 
 void proto_reg_handoff_a615a(void)
 {
-    heur_dissector_add("tftp", dissect_a615a_heur, "Arinc 615a Protocol", "a615a-3", proto_a615a,
+    heur_dissector_add("tftp", dissect_a615a_heur, "Arinc 615a Protocol", "a615a", proto_a615a,
                        HEURISTIC_ENABLE);
 }
